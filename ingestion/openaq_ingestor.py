@@ -8,21 +8,27 @@ import logging
 logging.basicConfig(level = logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Φορτώνουμε το API key από το .env αρχείο
 load_dotenv()
 API_KEY = os.getenv("OPENAQ_API_KEY")
 
-#API_KEY = "9045034cfc86693653c1a00788fef719a732c3b944f6d9cbcd12ee1925bf197e"
-
+# Βασική διεύθυνση του OpenAQ API
 BASE_URL = "https://api.openaq.org/v3"
 
+# Συντεταγμένες κέντρου Αθήνας
 ATHENS_COORDS = {
     "lat" : 37.97,
     "lon" : 23.72
 }
 
+# Ρύποι που μας ενδιαφέρουν
 POLLUTANTS = ["pm25", "pm10", "no2", "o3", "co"]
 
 def fetch_stations():
+    """
+    Τραβάει όλους τους σταθμούς μέτρησης
+    σε ακτίνα 20km από το κέντρο της Αθήνας.
+    """
     url = f"{BASE_URL}/locations"
     params = {
         "coordinates": f"{ATHENS_COORDS['lat']},{ATHENS_COORDS['lon']}",
@@ -31,7 +37,7 @@ def fetch_stations():
     }
 
     try:
-      response = requests.get(url, headers = {"X-API-KEY" : API_KEY}, timeout = 30)
+      response = requests.get(url, params = params, headers = {"X-API-KEY" : API_KEY}, timeout = 30)
       response.raise_for_status()
     except requests.exceptions.Timeout:
         logger.warning(f"Timeout fetching stations - aborting.")
@@ -59,24 +65,15 @@ def fetch_stations():
             continue
 
     df = pd.DataFrame(stations)
+     # Αφαιρούμε σταθμούς με ίδιες συντεταγμένες
     df = df.drop_duplicates(subset=["latitude","longitude"])
     return df
-#if __name__ == "__main__":
-    #headers = {"X-API-KEY" : API_KEY}
-    #url = f"{BASE_URL}/locations"
-    #params = {
-        #"coordinates": f"{ATHENS_COORDS['lat']},{ATHENS_COORDS['lon']}",
-        #"radius": 20000,
-        #"limit": 100
-    #}
 
-
-    #response = requests.get(url, params=params, headers=headers, timeout=30)
-    #print("Status c
-    # ode:", response.status_code)
-    #print("Response:", response.text[:500])
-
-def fetch_measurements(station_id, hours_back = 24):
+def fetch_measurements(station_id):
+    """
+    Τραβάει τις τελευταίες μετρήσεις ρύπων
+    για έναν συγκεκριμένο σταθμό.
+    """
     url = f"{BASE_URL}/locations/{station_id}/sensors"
     headers = {"X-API-KEY" : API_KEY}
 
@@ -97,9 +94,16 @@ def fetch_measurements(station_id, hours_back = 24):
     measurements = []
 
     for sensor in data.get("results", []):
+
         pollutant = sensor["parameter"]["name"]
+        # Κρατάμε μόνο τους ρύπους που μας ενδιαφέρουν
         if pollutant not in POLLUTANTS:
             continue
+        
+        # Παραλείπουμε sensors χωρίς πρόσφατες μετρήσεις
+        if not sensor.get("latest"):
+            continue
+
         try:
           measurements.append({
             "station_id" : station_id,
@@ -112,43 +116,45 @@ def fetch_measurements(station_id, hours_back = 24):
         except KeyError as e:
             logger.warning(f"Missing field {e} for station {station_id} - Skipping sensor..")
             continue
-
+    logger.info(f"Fetched {len(measurements)} measurements for station {station_id}")
     return pd.DataFrame(measurements)
 
 def run_ingestion():
-   print("Fetching stations...")
+   """
+    Κεντρική συνάρτηση ingestion — τραβάει όλους
+    τους σταθμούς και τις μετρήσεις τους.
+    """
+   logger.info("Fetching stations...")
    stations_df = fetch_stations()
    
+   # Αν δεν βρέθηκαν σταθμοί, δεν συνεχίζουμε
    if stations_df.empty:
-       logger.error("No fetcing stations - aborting ingerstion.")
+       logger.error("No fetcing stations - aborting ingestion.")
        return pd.DataFrame()
    
-   all_measaurements = []
+   all_measurements = []
 
    for station_id in stations_df["station_id"]:
        df = fetch_measurements(station_id)
        if not df.empty:
-           all_measaurements.append(df)
-    
-   if not all_measaurements:
+           all_measurements.append(df)
+
+   # Αν κανένας σταθμός δεν επέστρεψε μετρήσεις
+   if not all_measurements:
        logger.error("No measurements fetched")
        return pd.DataFrame()
    
-   combined = pd.concat(all_measaurements, ignore_index = True)
+   # Ενώνουμε όλες τις μετρήσεις σε ένα DataFrame
+   combined = pd.concat(all_measurements, ignore_index = True)
+
+   # Προσθέτουμε metadata σταθμού σε κάθε μέτρηση
    combined = combined.merge(
        stations_df[["station_id", "station_name", "latitude", "longitude"]], 
        on = "station_id", how = "left")
 
-   print(f"\nIngestion completed: {len(combined)} records fetched")
+   logger.info(f"Ingestion complete: {len(combined)} records fetched.")
    return combined
 
-if __name__ == "__main__":
-    #df_stations = fetch_stations()
+if __name__ == "__main__": 
     df = run_ingestion()
     print(df)
-    #print("Stations:")
-    #print(df_stations)
-    #print ("\n--- Measurements for first station ---")
-    #first_station_id= df_stations["station_id"].iloc[0]
-    #df_measurements = fetch_measurements(first_station_id)
-    #print(df_measurements)

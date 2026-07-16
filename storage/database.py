@@ -1,20 +1,30 @@
 import duckdb
-import pandas as ps
+import pandas as pd
 from pathlib import Path
 import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Path της τοπικής βάσης δεδομένων
 DB_PATH = "data/athens-air-health.duckdb"
 
 def get_connection():
+    """
+    Επιστρέφει σύνδεση με τη βάση DuckDB.
+    Δημιουργεί τον φάκελο data/ αν δεν υπάρχει.
+    """
     Path(DB_PATH).parent.mkdir(parents = True, exist_ok = True)
     return duckdb.connect(DB_PATH)
 
 def initialize_schema():
+    """
+    Δημιουργεί τους πίνακες της βάσης αν δεν υπάρχουν.
+    Ασφαλές να τρέχει πολλές φορές (idempotent).
+    """
     con = get_connection()
 
+    # Dimension table: μοναδικοί σταθμοί μέτρησης
     con.execute(""" 
                 CREATE TABLE IF NOT EXISTS dim_stations (
                     station_id INTEGER PRIMARY KEY,
@@ -23,6 +33,8 @@ def initialize_schema():
                     longitude DOUBLE,
                 )
                 """)
+    
+    # Fact table: ωριαίες μετρήσεις ρύπων ανά σταθμό
     con.execute(""" 
                 CREATE TABLE IF NOT EXISTS fact_air_quality (
                     station_id INTEGER,
@@ -33,6 +45,8 @@ def initialize_schema():
                     fetched_at TIMESTAMP
                 )
                 """)
+    
+    # Fact table: ωριαία καιρικά δεδομένα ανά τοποθεσία
     con.execute(""" 
                 CREATE TABLE IF NOT EXISTS fact_weather (
                     location VARCHAR,
@@ -50,6 +64,10 @@ def initialize_schema():
     con.close()
 
 def upsert_stations(df):
+    """
+    Εισάγει νέους σταθμούς στη βάση.
+    Αγνοεί σταθμούς που υπάρχουν ήδη (INSERT OR IGNORE).
+    """
     con = get_connection()
     con.execute("""
                 INSERT OR IGNORE INTO dim_stations
@@ -61,6 +79,10 @@ def upsert_stations(df):
     con.close()
 
 def insert_measurements(df):
+    """
+    Εισάγει μετρήσεις ρύπων στη βάση.
+    Αποφεύγει διπλότυπα βάσει station_id + pollutant + timestamp.
+    """
     con = get_connection()
     con.execute("""
                 INSERT INTO fact_air_quality
@@ -80,6 +102,10 @@ def insert_measurements(df):
     con.close()
 
 def insert_weather(df):
+    """
+    Εισάγει καιρικά δεδομένα στη βάση.
+    Αποφεύγει διπλότυπα βάσει location + timestamp.
+    """
     con = get_connection()
     con.execute("""
                 INSERT INTO fact_weather
@@ -92,38 +118,24 @@ def insert_weather(df):
                 WHERE NOT EXISTS (
                 SELECT 1 FROM fact_weather fw
                 WHERE fw.location = df.location
-                AND CAST(fw.timestamp AS TIMESTAMP) = CAST(df.timestamp AS TIEMSTAMP) 
+                AND CAST(fw.timestamp AS TIMESTAMP) = CAST(df.timestamp AS TIMESTAMP) 
                 )
                 """)
     logger.info(f"Inserted {len(df)} weather records.")
     con.close()
 
-if __name__ == "__main__":
-    import sys
-    sys.path.append(".")
-
-    from ingestion.openaq_ingestor import run_ingestion
-    from ingestion.weather_ingestor import run_weather_ingestion
-    
-    initialize_schema()
-
-    aq_df = run_ingestion()
-    print("AQ columns", aq_df.columns.tolist())
-    weather_df = run_weather_ingestion()
-
-    stations_df = aq_df[["station_id", "station_name", "latitude", "longitude"]].drop_duplicates()
-    measurements_df = aq_df[["station_id", "pollutant", "value", "unit", "timestamp", "fetched_at"]]
-
-    upsert_stations(stations_df)
-    insert_measurements(measurements_df)
-    insert_weather(weather_df)
-
+def insert_drivers(df):
     con = get_connection()
-    print("\n---Stations---")
-    print(con.execute("SELECT * FROM dim_stations").df())
-    print("\n---Air Quality (first 5)---")
-    print(con.execute("SELECT * FROM fact_air_quality LIMIT 5").df())
-    print("\n---Weather (first 5)---")
-    print(con.execute("SELECT * FROM fact_weather LIMIT 5").df())
+    con.execute("CREATE OR REPLACE TABLE dim_drivers AS SELECT * FROM df")
+    logger.info(f"Inserted {len(df)} drivers.")
     con.close()
-    
+
+def insert_driver_locations(df):
+    con = get_connection()
+    con.execute("CREATE OR REPLACE TABLE fact_driver_locations AS SELECT * FROM df")
+    logger.info(f"Inserted {len(df)} driver locations records.")
+    con.close()
+
+if __name__ == "__main__":
+    initialize_schema()
+    print("Database initialized at:", DB_PATH)

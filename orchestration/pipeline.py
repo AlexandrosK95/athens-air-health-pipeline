@@ -11,9 +11,12 @@ from storage.database import (
     insert_weather
 )
 from transform.transforms import compute_aqi_classifications, save_aqi_classifications
+from ingestion.drivers import run_driver_simulation
+from storage.database import insert_drivers, insert_driver_locations
 
 @task(name = "Initialize Database")
 def task_init_db():
+    """Αρχικοποιεί τη βάση δεδομένων και δημιουργεί τους πίνακες."""
     logger = get_run_logger()
     logger.info("Initializing Database")
 
@@ -21,11 +24,21 @@ def task_init_db():
 
 @task(name = "Ingest Air Quality", retries = 3, retry_delay_seconds = 60)
 def task_ingest_aq():
+    """
+    Τραβάει μετρήσεις ρύπων από το OpenAQ API.
+    Επαναλαμβάνει έως 3 φορές αν αποτύχει (π.χ. προβλήματα δικτύου).
+    """
     logger = get_run_logger()
     logger.info("Fetching air quality data...")
 
     df = run_ingestion()
-
+    
+     # Αν δεν υπάρχουν δεδομένα, σταματάμε
+    if df.empty:
+       logger.error("No AQ data fetched - skipping.")
+       return 0
+    
+    # Χωρίζουμε σε σταθμούς και μετρήσεις
     stations_df = df[["station_id","station_name","latitude","longitude"]].drop_duplicates()
     measurements_df = df[["station_id", "pollutant", "value", "unit", "timestamp", "fetched_at"]]
 
@@ -37,10 +50,20 @@ def task_ingest_aq():
 
 @task(name = "Ingest weather", retries = 3, retry_delay_seconds = 60)
 def task_ingest_weather():
+    """
+    Τραβάει ωριαία καιρικά δεδομένα από το Open-Meteo API.
+    Επαναλαμβάνει έως 3 φορές αν αποτύχει.
+    """
     logger = get_run_logger()
     logger.info("Fetching weather data...")
 
     df = run_weather_ingestion()
+
+     # Αν δεν υπάρχουν δεδομένα, σταματάμε
+    if df.empty:
+       logger.error("No weather data fetched - skipping.")
+       return 0
+    
     insert_weather(df)
 
     logger.info(f"Weather ingestion complete, {len(df)} records.")
@@ -49,6 +72,10 @@ def task_ingest_weather():
 
 @task(name = "Run Transforms")
 def task_transforms():
+    """
+    Εκτελεί τους μετασχηματισμούς — AQI classification
+    και αποθήκευση στο mart table.
+    """
     logger = get_run_logger()
     logger.info("Running Transforms...")
 
@@ -58,13 +85,32 @@ def task_transforms():
     logger.info(f"Transforms complete, {len(df)} records classified.")
     return len(df)
 
+@task(name = "Simulate Drivers")
+def task_simulate_drivers():
+   logger = get_run_logger()
+   logger.info("Running driver simulation...")
 
-flow(name = "Athens Air & Health Pipeline")
+   drivers_df, locations_df = run_driver_simulation()
+   insert_drivers(drivers_df)
+   insert_driver_locations(locations_df)
+
+   logger.info(f"Driver simulation complete: {len(drivers_df)} drivers, {len(locations_df)} locations.")
+   return {"drivers": len(drivers_df), "locations": len(locations_df)}
+
+@flow(name = "Athens Air and Health Pipeline")
 def athens_pipeline():
+    """
+    Κεντρικό pipeline που ενορχηστρώνει όλα τα tasks:
+    1. Αρχικοποίηση βάσης
+    2. Ingestion αέρα και καιρού
+    3. Transforms και αποθήκευση αποτελεσμάτων
+    4. Simulation διαδρομών οδηγών
+    """
     task_init_db()
     task_ingest_aq()
     task_ingest_weather()
     task_transforms()
+    task_simulate_drivers()
 
 
 if __name__ == "__main__":
