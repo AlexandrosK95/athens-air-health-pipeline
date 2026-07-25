@@ -11,6 +11,7 @@ from storage.database import (
     insert_weather
 )
 from transform.transforms import compute_aqi_classifications, save_aqi_classifications
+from transform.exposure_scoring import save_exposure_scores, compute_driver_exposure
 from ingestion.drivers import run_driver_simulation
 from storage.database import insert_drivers, insert_driver_locations
 
@@ -97,6 +98,17 @@ def task_simulate_drivers():
    logger.info(f"Driver simulation complete: {len(drivers_df)} drivers, {len(locations_df)} locations.")
    return {"drivers": len(drivers_df), "locations": len(locations_df)}
 
+@task(name = "Compute Exposure Scores")
+def task_exposure_scores():
+    logger = get_run_logger()
+    logger.info("Computing driver exposure scores...")
+
+    df = compute_driver_exposure()
+    save_exposure_scores(df)
+
+    logger.info(f"Exposure scoring complete, {len(df)} records.")
+    return len(df)
+
 @flow(name = "Athens Air and Health Pipeline")
 def athens_pipeline():
     """
@@ -111,7 +123,7 @@ def athens_pipeline():
     task_ingest_weather()
     task_transforms()
     task_simulate_drivers()
-
+    task_exposure_scores()
 
 if __name__ == "__main__":
     athens_pipeline()
