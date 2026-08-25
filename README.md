@@ -1,26 +1,62 @@
-# 🌍 Athens Air Quality & Urban Health Pipeline
+# Athens Urban Air Quality Monitoring & Exposure Assessment System
 
-> Automated ETL pipeline for real-time air quality monitoring across Athens & Piraeus, with driver exposure scoring and automated alerting.
-
----
-
-## 📌 Business Question
-
-**"Which neighborhoods in Athens & Piraeus experience the worst air quality, and how does it affect people who work and travel there daily?"**
+> A real-time ETL pipeline for air pollution monitoring, geospatial analysis, and population exposure assessment across the Athens metropolitan area.
 
 ---
 
-## 🏗️ Architecture
+## Research Context
 
+This project aligns with research in **urban air quality modeling** and **population exposure assessment** — key areas of environmental informatics and scientific computing. It demonstrates real-world application of:
+
+- Spatiotemporal data engineering
+- Geospatial weighted interpolation (Inverse Distance Weighting)
+- Automated environmental monitoring pipelines
+- Synthetic agent-based simulation for exposure assessment
+
+---
+
+## Business Question
+
+**"Which neighborhoods in Athens & Piraeus experience the worst air quality, and what is the estimated pollution exposure of workers traveling through these areas daily?"**
+
+---
+
+## Architecture
+
+```
 [OpenAQ API] ──────────────────────┐
-[Open-Meteo API] ──────────────────┤──► [Ingestion Layer] ──► [DuckDB] ──► [Transforms] ──► [Dashboard]
-[data.gov.gr GIS] ─────────────────┘         Python              Star         AQI EU           Streamlit
-requests            Schema      Thresholds         Plotly
-Prefect            Folium
+[Open-Meteo API] ──────────────────┤──► [Ingestion] ──► [DuckDB] ──► [Transforms] ──► [Dashboard]
+[data.gov.gr GIS] ─────────────────┘     Python          Star         AQI + IDW        Streamlit
+                                         requests         Schema       Exposure          Plotly
+                                                                       Scoring           Folium
+
+[Driver Simulation] ──────────────────► [Exposure Scoring] ──► [Alerting System]
+ 100 Synthetic Agents                    IDW Interpolation       Email Reports
+```
 
 ---
 
-## 📊 Data Sources
+## Scientific Methods
+
+### Inverse Distance Weighting (IDW)
+When a driver is located more than 5km from any monitoring station, pollution exposure is estimated using IDW interpolation:
+
+```
+weight_i = 1 / distance_i
+exposure = Σ(value_i × weight_i) / Σ(weight_i)
+```
+
+This method is standard in environmental science for spatial interpolation of air quality measurements.
+
+### Haversine Distance
+All spatial distances are computed using the Haversine formula, which accounts for the curvature of the Earth.
+
+### EU Air Quality Index (AQI)
+Measurements are classified using official **European Environment Agency (EEA)** thresholds for PM2.5, PM10, NO2, O3, and CO.
+
+---
+
+## Data Sources
 
 | Source | Data | Update Frequency | API Key |
 |--------|------|-----------------|---------|
@@ -30,16 +66,20 @@ Prefect            Folium
 
 ---
 
-## 🗂️ Project Structure
+## Project Structure
 
+```
 athens-air-health-pipeline/
 ├── ingestion/
 │   ├── openaq_ingestor.py      # OpenAQ API client
-│   └── weather_ingestor.py     # Open-Meteo API client
+│   ├── weather_ingestor.py     # Open-Meteo API client
+│   ├── drivers.py              # Synthetic driver simulation
+│   └── alerting.py             # Email alerting system
 ├── storage/
 │   └── database.py             # DuckDB schema & write functions
 ├── transform/
-│   └── transforms.py           # EU AQI classification
+│   ├── transforms.py           # EU AQI classification
+│   └── exposure_scoring.py     # IDW exposure scoring
 ├── orchestration/
 │   └── pipeline.py             # Prefect flow (DAG)
 ├── dashboard/
@@ -48,21 +88,22 @@ athens-air-health-pipeline/
 ├── .env                        # API keys (gitignored)
 ├── .gitignore
 └── requirements.txt
+```
 
 ---
 
-## ⚙️ Tech Stack
+## Tech Stack
 
-- **Python** — pandas, requests, duckdb
+- **Python** — pandas, numpy, requests, duckdb
 - **DuckDB** — analytical database with star schema
 - **Prefect** — pipeline orchestration & scheduling
 - **Streamlit** — interactive dashboard
 - **Plotly** — data visualization
-- **Folium** — interactive maps
+- **Folium** — interactive geospatial maps
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Clone & Install
 ```bash
@@ -74,11 +115,14 @@ pip install -r requirements.txt
 ```
 
 ### 2. Set up API Key
-Δημιούργησε αρχείο `.env`:
-
+Create a `.env` file:
+```
 OPENAQ_API_KEY=your_api_key_here
-
-Αποκτήστε δωρεάν API key: https://explore.openaq.org/register
+EMAIL_SENDER=your_email
+EMAIL_PASSWORD=your_password
+EMAIL_RECEIVER=your_email
+```
+Get a free API key at: https://explore.openaq.org/register
 
 ### 3. Run Pipeline
 ```bash
@@ -92,18 +136,16 @@ streamlit run dashboard/app.py
 
 ---
 
-## 📈 Dashboard Features
+## Dashboard Features
 
 - **KPI Cards** — Active stations, good air quality %, hazardous readings, avg temperature
-- **AQI Distribution Chart** — Bar chart με EU color coding
-- **Interactive Map** — Σταθμοί χρωματισμένοι ανά κατηγορία AQI
-- **Weather Charts** — Θερμοκρασία & υγρασία για Αθήνα & Πειραιά (48h)
+- **AQI Distribution Chart** — Bar chart with EU color coding
+- **Interactive Map** — Stations color-coded by AQI category
+- **Weather Charts** — Temperature & humidity for Athens & Piraeus (48h)
 
 ---
 
-## 🔬 AQI Classification
-
-Βάσει επίσημων ορίων της **European Environment Agency (EEA)**:
+## AQI Classification (EU EEA Thresholds)
 
 | Category | PM2.5 | PM10 | NO2 |
 |----------|-------|------|-----|
@@ -115,17 +157,23 @@ streamlit run dashboard/app.py
 
 ---
 
-## 🔮 Roadmap
+## Roadmap
 
-- [ ] Driver route simulation (100+ synthetic drivers)
-- [ ] Pollution exposure scoring per driver
-- [ ] Email alerting system for high-pollution zones
-- [ ] Streamlit Cloud deployment
+- [x] Real-time AQ ingestion (OpenAQ API)
+- [x] Weather data integration (Open-Meteo API)
+- [x] EU AQI classification
+- [x] Driver route simulation (100 synthetic agents)
+- [x] Pollution exposure scoring (IDW interpolation)
+- [x] Automated email alerting system
+- [ ] Parallel processing optimization
+- [ ] Predictive modeling (ML forecasting)
+- [ ] Web API layer (FastAPI)
 
 ---
 
-## 👤 Author
+## Author
 
-**Alexandros K.**  
-MSc Artificial Intelligence & Data Science  
+**Alexandros K.**
+MSc Artificial Intelligence & Data Science
+Interested in environmental informatics, spatiotemporal data engineering, and scientific computing applications.
 [GitHub](https://github.com/AlexandrosK95)
