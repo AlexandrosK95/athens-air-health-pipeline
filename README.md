@@ -173,7 +173,10 @@ streamlit run dashboard/app.py
 
 ## Author
 
-**Alexandros K.**
-MSc Artificial Intelligence & Data Science
-Interested in environmental informatics, spatiotemporal data engineering, and scientific computing applications.
-[GitHub](https://github.com/AlexandrosK95)
+  **Alexandros K.**   
+
+  MSc Artificial Intelligence & Data Science  
+
+  Interested in environmental informatics, spatiotemporal data engineering, and scientific computing applications.  
+  
+  [GitHub](https://github.com/AlexandrosK95)
