@@ -72,7 +72,7 @@ def compute_driver_exposure():
                 method = "weight"
 
             results.append( {
-                "drvier_id" : location["driver_id"],
+                "driver_id" : location["driver_id"],
                 "stop_num" : location["stop_num"],
                 "latitude" : location["latitude"],
                 "longitude" : location["longitude"],

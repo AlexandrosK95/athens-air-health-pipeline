@@ -1,5 +1,6 @@
 import sys
 sys.path.append(".")
+import time
 
 from prefect import flow, task, get_run_logger
 from ingestion.openaq_ingestor import run_ingestion
@@ -14,6 +15,7 @@ from transform.transforms import compute_aqi_classifications, save_aqi_classific
 from transform.exposure_scoring import save_exposure_scores, compute_driver_exposure
 from ingestion.drivers import run_driver_simulation
 from storage.database import insert_drivers, insert_driver_locations
+from ingestion.alerting import send_daily_report, send_monthly_report, check_and_send_hazardous_alerts
 
 @task(name = "Initialize Database")
 def task_init_db():
@@ -109,6 +111,17 @@ def task_exposure_scores():
     logger.info(f"Exposure scoring complete, {len(df)} records.")
     return len(df)
 
+@task(name = "Send Alerts")
+def task_send_alerts():
+    logger = get_run_logger()
+    logger.info("Computing driver exposure scores...")
+    check_and_send_hazardous_alerts()
+    time.sleep(10)
+    send_daily_report()
+    time.sleep(10)
+    send_monthly_report()
+    logger.info("Alerts Sent")
+    
 @flow(name = "Athens Air and Health Pipeline")
 def athens_pipeline():
     """
@@ -124,6 +137,7 @@ def athens_pipeline():
     task_transforms()
     task_simulate_drivers()
     task_exposure_scores()
+    task_send_alerts()
 
 if __name__ == "__main__":
     athens_pipeline()
